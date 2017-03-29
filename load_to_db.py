@@ -2,13 +2,13 @@ from codecs import open, decode
 import sqlite3
 import json
 import os
+import sys
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument('tweets_path', nargs=1)
 output_group = parser.add_mutually_exclusive_group(required=True)
-output_group.add_argument('--db', dest='db_path', nargs=1)
-output_group.add_argument('--json', dest='json_path', nargs=1)
+output_group.add_argument('--db', dest='db_path')
+output_group.add_argument('--json', dest='json', action='store_const', const=True)
 opt = parser.parse_args()
 
 
@@ -23,9 +23,6 @@ if opt.db_path:
     cursor.execute('CREATE TABLE tweets (id INTEGER PRIMARY KEY, text TEXT NOT NULL)')
     cursor.execute('CREATE TABLE hashtags (hashtag_id INTEGER PRIMARY KEY, tweet_id INTEGER NOT NULL, text TEXT NOT NULL)')
 
-json_file = None
-if opt.json_path:
-    json_file = open(opt.json_path[0], 'w', 'utf-8')
 
 def write_tweet(tweet):
     if cursor is not None:
@@ -33,43 +30,38 @@ def write_tweet(tweet):
         for hashtag in tweet['entities']['hashtags']:
             cursor.execute('INSERT INTO hashtags VALUES(NULL, ?, ?)', (tweet['id'], hashtag['text']))
 
-    if json_file is not None:
+    if opt.json:
         tweet_simple = {
             'id': tweet['id'],
             'text': tweet['text'],
             'hashtags': [h['text'] for h in tweet['entities']['hashtags']]
         }
-        json_file.write(json.dumps(tweet_simple))
-        json_file.write('\n')
+        print(json.dumps(tweet_simple))
 
-with open(opt.tweets_path[0], 'r', 'utf-8') as tweets_raw:
-    failed = 0
-    imported = 0
+failed = 0
+imported = 0
 
-    for tweet_raw in tweets_raw:
-        tweet_raw = tweet_raw.strip()
-        if not tweet_raw:
+for tweet_raw in sys.stdin:
+    tweet_raw = tweet_raw.strip()
+    if not tweet_raw:
+        continue
+
+    try:
+        tweet = json.loads(tweet_raw)
+
+        if 'id' not in tweet:
+            failed += 1
             continue
 
-        try:
-            tweet = json.loads(tweet_raw)
+        write_tweet(tweet)
+        imported += 1
+    except:
+        failed += 1
 
-            if 'id' not in tweet:
-                failed += 1
-                continue
+if opt.db_path:
+    db.commit()
+    db.close()
 
-            write_tweet(tweet)
-            imported += 1
-        except:
-            failed += 1
-
-    if opt.db_path:
-        db.commit()
-        db.close()
-
-    if opt.json_path:
-        json_file.close()
-
-    print('Failed to save {} lines'.format(failed))
-    print('Saved {} tweets'.format(imported))
+print('Failed to save {} lines'.format(failed))
+print('Saved {} tweets'.format(imported))
 
